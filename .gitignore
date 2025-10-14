@@ -1,0 +1,34 @@
+﻿# File: .gitignore
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# IDE settings
+.idea/
+.vscode/
+*.iws
+*.iml
+
+# Python virtual environments & cache
+venv/
+.venv/
+env/
+.env/
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+
+# HW related
+*.aux
+*.log
+*.out
+*.bbl
+*.blg
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+_minted*
+
+*.asv

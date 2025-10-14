@@ -1,0 +1,108 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Preamble
+% This is the master template file for your ECE 271A report.
+% It contains all formatting, packages, and document structure.
+% You should not need to edit this file often.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\documentclass[11pt, letterpaper]{article}
+
+% Required Packages
+\usepackage[margin=1in]{geometry}     % Set page margins
+\usepackage{amsmath, amssymb}         % For advanced math typesetting
+\usepackage{graphicx}                 % To include images
+\usepackage{hyperref}                 % For clickable links and a nice PDF outline
+\usepackage{listings}                 % To format source code
+\usepackage{xcolor}                   % For defining custom colors
+\usepackage{caption}                  % For customizing captions
+
+% Set graphicspath to automatically look for images in subdirectories.
+% This allows you to use \includegraphics{image_name.png} inside hw1/hw1.tex,
+% and LaTeX will correctly find hw1/image_name.png.
+\graphicspath{ {./}, {hw1/}, {hw2/}, {hw3/}, {hw4/}, {hw5/} }
+
+% Hyperref Configuration for PDF metadata
+\hypersetup{
+colorlinks=true,
+linkcolor=blue,
+filecolor=magenta,
+urlcolor=cyan,
+pdftitle={ECE 271A Homework Report},
+pdfauthor={JunPyung Kim},
+pdfsubject={Statistical Learning},
+pdfkeywords={Machine Learning, Pattern Recognition, UCSD},
+bookmarks=true,
+bookmarksopen=true
+}
+
+% Code Listing Style (for MATLAB or Python)
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{mystyle}{
+backgroundcolor=\color{backcolour},
+commentstyle=\color{codegreen},
+keywordstyle=\color{magenta},
+numberstyle=\tiny\color{codegray},
+stringstyle=\color{codepurple},
+basicstyle=\ttfamily\footnotesize,
+breakatwhitespace=false,
+breaklines=true,
+captionpos=b,
+keepspaces=true,
+numbers=left,
+numbersep=5pt,
+showspaces=false,
+showstringspaces=false,
+showtabs=false,
+tabsize=2
+}
+\lstset{style=mystyle}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Title Section
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\title{ECE 271A: Statistical Learning I \ Quiz Report}
+\author{
+JunPyung Kim \\
+PID: A69044427 \\
+University of California, San Diego
+}
+\date{\today}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Document Body
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{document}
+
+\maketitle
+
+% The abstract and table of contents are only included when compiling the full report
+\ifdefined\compileall
+\begin{abstract}
+This report presents the solutions and findings for the homework assignments in ECE 271A. The projects cover the implementation and analysis of fundamental statistical learning algorithms, including Bayesian classifiers, Gaussian models, dimensionality reduction techniques, non-parametric methods, and mixture models. Each section details the methodology, results, and discussion for the corresponding assignment.
+\end{abstract}
+\tableofcontents
+\newpage
+\fi
+
+%==============================================================================
+% Content Inclusion Logic --- This section dynamically inputs content
+%==============================================================================
+
+% If compiling the full report (triggered by 'make report'), input all hw files
+\ifdefined\compileall
+\input{hw1/hw1.tex}
+% \input{hw2/hw2.tex} % Uncomment as you complete
+% \input{hw3/hw3.tex}
+% \input{hw4/hw4.tex}
+% \input{hw5/hw5.tex}
+\fi
+
+% If compiling a single homework (e.g., 'make hw1'), input only that file
+\ifdefined\singlehw
+\input{\singlehw/\singlehw.tex}
+\fi
+
+\end{document}
