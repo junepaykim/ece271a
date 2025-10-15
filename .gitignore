@@ -30,5 +30,6 @@ __pycache__/
 *.fdb_latexmk
 *.synctex.gz
 _minted*
+*.tex
 
 *.asv
