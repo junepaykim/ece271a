@@ -119,6 +119,37 @@ def plot_best_worst_features(fg_data, bg_data, best_indices, worst_indices, outp
     plt.close(fig)
 
 
+def plot_all_features(fg_data, bg_data, output_path):
+    """Plot marginals for all 64 features."""
+    fig, axes = plt.subplots(8, 8, figsize=(22, 22))
+    fig.suptitle("Marginal Densities for All 64 Features", fontsize=16)
+
+    for i in range(64):
+        ax = axes[i // 8, i % 8]
+
+        mean_fg = np.mean(fg_data[:, i])
+        std_fg = np.std(fg_data[:, i], ddof=0)
+        mean_bg = np.mean(bg_data[:, i])
+        std_bg = np.std(bg_data[:, i], ddof=0)
+
+        std_fg = max(std_fg, 1e-6)
+        std_bg = max(std_bg, 1e-6)
+
+        x_min = min(mean_fg - 4 * std_fg, mean_bg - 4 * std_bg)
+        x_max = max(mean_fg + 4 * std_fg, mean_bg + 4 * std_bg)
+        x = np.linspace(x_min, x_max, 100)
+
+        ax.plot(x, scipy.stats.norm.pdf(x, mean_fg, std_fg), 'b-', label='Cheetah' if i == 0 else "")
+        ax.plot(x, scipy.stats.norm.pdf(x, mean_bg, std_bg), 'r-', label='Grass' if i == 0 else "")
+        ax.set_title(f'Feature {i}', fontsize=10)
+        ax.tick_params(labelsize=8)
+
+    fig.legend(loc='upper right')
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    plt.savefig(output_path, dpi=150)
+    plt.close(fig)
+
+
 def plot_segmentation_results(predicted_mask, true_mask, title, output_path):
     """Plot segmentation results."""
     fig, axes = plt.subplots(1, 2, figsize=(12, 6))
@@ -235,6 +266,10 @@ def main():
                              plot_features_filename)
     print(f"Feature plots saved to {plot_features_filename}")
 
+    plot_all_filename = os.path.join(OUTPUT_DIR, 'marginal_densities_all_64.png')
+    plot_all_features(fg_data, bg_data, plot_all_filename)
+    print(f"All 64 feature plots saved to {plot_all_filename}")
+
     print("\n" + "=" * 70)
     print("Problem 6(c): Classification")
     X_test_64, img_h, img_w = extract_dct_vectors_sliding_window(image, zig_zag_map)
@@ -253,7 +288,6 @@ def main():
                               plot_64d_filename)
     print(f"64D plot saved to {plot_64d_filename}")
 
-    # 5. Classify 8D
     print("Classifying with 8D Gaussians (best features)...")
     X_test_8 = X_test_64[:, best_8_indices]
 
@@ -285,6 +319,7 @@ def main():
         print("\nSUCCESS!")
     else:
         print("\nSomething went wrong!")
+
 
 if __name__ == "__main__":
     main()
