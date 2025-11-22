@@ -5,8 +5,8 @@ This repository contains a series of projects completed for UCSD's ECE 271A: Sta
 ## Core Competencies Demonstrated
 
 -   **Classification:** Bayesian Decision Theory, Gaussian Classifiers (ML, Bayesian), K-Nearest Neighbors
+-   **Parameter Estimation:** Maximum Likelihood (MLE), Maximum A Posteriori (MAP), Bayesian Predictive Densities
 -   **Dimensionality Reduction:** Principal Component Analysis (PCA), Fisher's Linear Discriminant Analysis (LDA)
--   **Density Estimation:** Parametric (MLE, Bayesian Estimation) and Non-Parametric (Kernel Density) Methods
 -   **Clustering & Latent Variables:** Gaussian Mixture Models (GMM), Expectation-Maximization (EM) Algorithm
 -   **Model Evaluation:** Bias-Variance Tradeoff, Error Rate Calculation, Confusion Matrices
 
@@ -24,7 +24,7 @@ This table provides a high-level overview of each project. Click on the project 
 | -------------------------------------------------------------------- | ------------------------------------------------- | ------------------------ |
 | [**HW1: Bayesian Classifier for Image Segmentation**](#hw1-bayesian-classifier-for-image-segmentation) | Bayesian Decision Theory, DCT Feature Extraction  | **Error Rate: 17.27%** |
 | [**HW2: Gaussian Classifiers for Segmentation**](#hw2-gaussian-classifiers-for-segmentation) | Multivariate Gaussians, MLE, Feature Selection (KL Divergence) | **Error Rate: 7.48%** |
-| **HW3: Dimensionality Reduction** *(Details to be added)* | PCA, Fisher's LDA                                 | Visualization, Separation|
+| [**HW3: Bayesian Parameter Estimation**](#hw3-bayesian-parameter-estimation) | MAP, Bayesian Predictive, Conjugate Priors        | **PoE vs. Prior Uncertainty**|
 | **HW4: Non-Parametric Methods** *(Details to be added)* | K-Nearest Neighbors, Kernel Density Estimation    | Classification Accuracy  |
 | **HW5: Mixture Models & EM** *(Details to be added)* | Gaussian Mixture Models, Expectation-Maximization | Log-Likelihood, Clustering |
 
@@ -76,3 +76,28 @@ This table provides a high-level overview of each project. Click on the project 
     -   `hw2_solution.py`: Python script for MLE parameter estimation, KL divergence calculation, and image classification. 
     -   `output/`: Directory containing generated plots, including marginal densities and segmentation masks.
     -   `TrainingSamplesDCT_8_new.mat`: Updated training data for Gaussian estimation.
+
+### HW3: Bayesian Parameter Estimation
+
+-   **Objective:** To explore Bayesian Parameter Estimation by treating the class-conditional mean $\mu$ as a random variable rather than a fixed constant. This project compares the performance of Maximum Likelihood (ML), Maximum A Posteriori (MAP), and Bayesian Predictive estimators across varying dataset sizes ($N$) and prior uncertainties ($\alpha$).
+
+-   **Methodology:**
+    1.  **Model Setup:** Class-conditional densities were modeled as multivariate Gaussians with known covariance but unknown mean.
+    2.  **Prior Distribution:** A Gaussian prior $P(\mu) \sim \mathcal{N}(\mu_0, \Sigma_0)$ was applied to the mean, where $\Sigma_0 = \alpha W$.
+    3.  **Estimator Comparison:**
+        * **ML:** Computes parameters solely from training data.
+        * **MAP:** Maximizes the posterior density $P(\mu | \mathcal{D})$.
+        * **Bayesian Predictive:** Integrates out the unknown parameters to compute $P(x | \mathcal{D})$.
+    4.  **Strategies:** Tested two prior strategies: "Informative" (Strategy 1, a good guess close to the true mean) and "Non-Informative" (Strategy 2, a generic guess).
+
+-   **Result:**
+    -   **Small Datasets:** With limited data (Dataset 1), the Bayesian and MAP estimators significantly outperformed ML when the prior was informative (Strategy 1). Conversely, a poor prior (Strategy 2) degraded performance.
+    -   **Data Dominance:** As the dataset size increased (Dataset 4), the likelihood term dominated the prior. All estimators converged to the ML solution regardless of the prior strategy or $\alpha$ value.
+    -   **Visual Analysis:** The plot below demonstrates the "Informative Prior" scenario on a small dataset, where the Bayesian approach (Blue line) achieves a lower probability of error compared to the ML baseline (Green line) at low alpha values.
+
+      ![PoE vs Alpha Strategy 1 Dataset 1](hw3/output/PoE_Strategy_1_Dataset_1.png)
+
+-   **File Structure for HW3:**
+    -   `hw3_solution.py`: Script implementing the three estimators and generating PoE curves.
+    -   `hw3.pdf`: Detailed report analyzing the convergence behavior of the estimators.
+    -   `output/`: Contains plots showing Probability of Error vs. Alpha for all strategies and datasets.
