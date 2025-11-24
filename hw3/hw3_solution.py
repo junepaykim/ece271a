@@ -41,7 +41,7 @@ def dct2(block):
 
 def extract_dct_features(image_path, zig_zag_map):
     """
-    Reads image, applies sliding window (padding to match ground truth size),
+    Reads image, applies sliding window,
     computes DCT, returns (N, 64) feature matrix.
     """
     img = imageio.imread(image_path, mode='L')
@@ -66,19 +66,36 @@ def extract_dct_features(image_path, zig_zag_map):
     return features, h, w
 
 
-def compute_error(predictions, ground_truth, prior_fg, prior_bg):
+def compute_error_debug(predictions, ground_truth, prior_fg, prior_bg, dataset_name=""):
     """
-    Computes probability of error.
-    predictions: 1D array (0 for FG/Cheetah, 1 for BG/Grass)
-    ground_truth: 1D array (255 for FG, 0 for BG)
+    Computes probability of error and prints debug info.
     """
-    gt_fg = (ground_truth == 255)
-    gt_bg = (ground_truth == 0)
+    unique_gt = np.unique(ground_truth)
+    if len(unique_gt) > 2:
+        print(f"[WARN] Ground truth contains values other than 0/255: {unique_gt}")
 
-    error_fg = np.sum(predictions[gt_fg] == 0) / np.sum(gt_fg)
-    error_bg = np.sum(predictions[gt_bg] == 1) / np.sum(gt_bg)
+    gt_fg = (ground_truth >= 128)
+    gt_bg = (ground_truth < 128)
 
-    total_error = error_fg * prior_fg + error_bg * prior_bg
+    n_fg = np.sum(gt_fg)
+    n_bg = np.sum(gt_bg)
+
+    fg_errors = np.sum(predictions[gt_fg] == 0)
+    bg_errors = np.sum(predictions[gt_bg] == 1)
+
+    p_error_fg = fg_errors / n_fg if n_fg > 0 else 0
+    p_error_bg = bg_errors / n_bg if n_bg > 0 else 0
+
+    total_error = p_error_fg * prior_fg + p_error_bg * prior_bg
+
+    print(f"  [DEBUG Error {dataset_name}]")
+    print(f"    - Total Pixels: {len(ground_truth)}")
+    print(f"    - GT FG pixels: {n_fg}, GT BG pixels: {n_bg}")
+    print(f"    - FG Errors (False Negatives): {fg_errors} ({p_error_fg * 100:.2f}%)")
+    print(f"    - BG Errors (False Positives): {bg_errors} ({p_error_bg * 100:.2f}%)")
+    print(f"    - Priors Used -> FG: {prior_fg:.4f}, BG: {prior_bg:.4f}")
+    print(f"    - Weighted Total Error: {total_error * 100:.4f}%")
+
     return total_error
 
 
@@ -102,13 +119,6 @@ def gaussian_log_likelihood_batch(X, mu, cov):
 
 
 def get_posterior_params(mu_0, cov_0, data, N):
-    """
-    Calculates mu_n and Sigma_n based on the formulas provided.
-    mu_0: (64,)
-    cov_0: (64, 64)
-    data: (N, 64) training data
-    N: number of samples
-    """
     mu_ml = np.mean(data, axis=0)
     sigma_ml = np.cov(data, rowvar=False, ddof=0)
 
@@ -134,6 +144,8 @@ def solve():
     print("Processing Test Image...")
     test_features, h_img, w_img = extract_dct_features(CHEETAH_IMG, zig_zag)
     ground_truth = imageio.imread(CHEETAH_MASK).flatten()
+
+    print(f"[DEBUG] Unique values in mask: {np.unique(ground_truth)}")
 
     strategies = [
         {'name': 'Strategy 1', 'data': prior_1},
@@ -171,11 +183,13 @@ def solve():
             log_p_fg = np.log(p_fg)
             log_p_bg = np.log(p_bg)
 
+            print(f"[DEBUG] Dataset {d_id}: N_FG={n_fg}, N_BG={n_bg}, P(FG)={p_fg:.4f}, P(BG)={p_bg:.4f}")
+
             errors_ml = []
             errors_map = []
             errors_bayes = []
 
-            # 1. ML Solution (Constant for all alphas)
+            # 1. ML Solution
             mu_ml_fg = np.mean(fg_train, axis=0)
             cov_ml_fg = np.cov(fg_train, rowvar=False, ddof=0)
             mu_ml_bg = np.mean(bg_train, axis=0)
@@ -185,7 +199,7 @@ def solve():
             ll_bg_ml = gaussian_log_likelihood_batch(test_features, mu_ml_bg, cov_ml_bg)
             decisions_ml = ((ll_fg_ml + log_p_fg) > (ll_bg_ml + log_p_bg)).astype(int)
 
-            err_ml_val = compute_error(decisions_ml, ground_truth, p_fg, p_bg)
+            err_ml_val = compute_error_debug(decisions_ml, ground_truth, p_fg, p_bg, dataset_name=f"D{d_id}_ML")
 
             print(f"Dataset {d_id}: Processing alphas...")
             for alpha in tqdm(alpha_mat, leave=False):
@@ -201,7 +215,11 @@ def solve():
                 ll_fg_map = gaussian_log_likelihood_batch(test_features, mu_n_fg, cov_ml_fg)
                 ll_bg_map = gaussian_log_likelihood_batch(test_features, mu_n_bg, cov_ml_bg)
                 decisions_map = ((ll_fg_map + log_p_fg) > (ll_bg_map + log_p_bg)).astype(int)
-                errors_map.append(compute_error(decisions_map, ground_truth, p_fg, p_bg))
+                errors_map.append(compute_error_debug(decisions_map, ground_truth, p_fg, p_bg, "") if False else
+                                  (np.sum(decisions_map[(ground_truth >= 128)] == 0) / np.sum(
+                                      ground_truth >= 128) * p_fg +
+                                   np.sum(decisions_map[(ground_truth < 128)] == 1) / np.sum(
+                                              ground_truth < 128) * p_bg))
 
                 # 3. Bayesian Predictive Solution
                 pred_cov_fg = cov_ml_fg + sigma_n_fg
@@ -210,7 +228,11 @@ def solve():
                 ll_fg_bayes = gaussian_log_likelihood_batch(test_features, mu_n_fg, pred_cov_fg)
                 ll_bg_bayes = gaussian_log_likelihood_batch(test_features, mu_n_bg, pred_cov_bg)
                 decisions_bayes = ((ll_fg_bayes + log_p_fg) > (ll_bg_bayes + log_p_bg)).astype(int)
-                errors_bayes.append(compute_error(decisions_bayes, ground_truth, p_fg, p_bg))
+                errors_bayes.append(compute_error_debug(decisions_bayes, ground_truth, p_fg, p_bg, "") if False else
+                                    (np.sum(decisions_bayes[(ground_truth >= 128)] == 0) / np.sum(
+                                        ground_truth >= 128) * p_fg +
+                                     np.sum(decisions_bayes[(ground_truth < 128)] == 1) / np.sum(
+                                                ground_truth < 128) * p_bg))
 
             plt.figure(figsize=(10, 6))
             plt.semilogx(alpha_mat, errors_bayes, label='Predictive (Bayesian)', linewidth=2)
