@@ -25,8 +25,7 @@ This table provides a high-level overview of each project. Click on the project 
 | [**HW1: Bayesian Classifier for Image Segmentation**](#hw1-bayesian-classifier-for-image-segmentation) | Bayesian Decision Theory, DCT Feature Extraction  | **Error Rate: 17.27%** |
 | [**HW2: Gaussian Classifiers for Segmentation**](#hw2-gaussian-classifiers-for-segmentation) | Multivariate Gaussians, MLE, Feature Selection (KL Divergence) | **Error Rate: 7.48%** |
 | [**HW3: Bayesian Parameter Estimation**](#hw3-bayesian-parameter-estimation) | MAP, Bayesian Predictive, Conjugate Priors        | **Error Rate: ~11.80%**|
-| **HW4: Non-Parametric Methods** *(Details to be added)* | K-Nearest Neighbors, Kernel Density Estimation    | Classification Accuracy  |
-| **HW5: Mixture Models & EM** *(Details to be added)* | Gaussian Mixture Models, Expectation-Maximization | Log-Likelihood, Clustering |
+| [**HW4: Mixture Models & EM**](#hw4-mixture-models--em)              | Gaussian Mixture Models, Expectation-Maximization | **Error Rate: ~11.50%** |
 
 -----
 
@@ -101,3 +100,23 @@ This table provides a high-level overview of each project. Click on the project 
     -   `hw3_solution.py`: Script implementing the three estimators and generating PoE curves.
     -   `hw3.pdf`: Detailed report analyzing the convergence behavior of the estimators.
     -   `output/`: Contains plots showing Probability of Error vs. Alpha for all strategies and datasets.
+
+### HW4: Mixture Models & EM Algorithm
+
+-   **Objective:** To implement a Gaussian Mixture Model (GMM) classifier using the Expectation-Maximization (EM) algorithm. This project investigates how random initialization affects convergence and how the number of mixture components ($C$) impacts classification error.
+
+-   **Methodology:**
+    1.  **GMM Training (EM):** For both foreground and background classes, densities were modeled as mixtures of multivariate Gaussians with *diagonal* covariance matrices.
+    2.  **Initialization Sensitivity (Part A):** Trained 5 different models per class (random initialization) with $C=8$ components to observe the variance in error rates due to local maxima in the EM likelihood surface.
+    3.  **Model Complexity (Part B):** Trained models with component counts $C \in \{1, 2, 4, 8, 16, 32\}$ to analyze the trade-off between model flexibility and overfitting.
+    4.  **Evaluation:** Probability of Error (PoE) was plotted against the number of feature dimensions (1 to 64).
+
+-   **Result:**
+    -   **Initialization:** The error rates varied noticeably between different random initializations, confirming that EM is sensitive to starting parameters and can get stuck in local optima.
+    -   **Component Complexity:** Surprisingly, simpler models ($C=1$) performed remarkably well (~11.5% error) on this specific test set. Increasing complexity to $C=32$ did not monotonically decrease error, likely due to the diagonal covariance constraint effectively capturing the data variance without needing many components, or potential overfitting on the 64-dimensional space.
+
+      ![PoE vs Dimensions for Varying Components](hw4/output/prob6_b_components.png)
+
+-   **File Structure for HW4:**
+    -   `hw4_solution.py`: Python script implementing the custom GMM-EM class and performing the experiments.
+    -   `hw4/output/`: Contains the plots for initialization sensitivity and component analysis.
