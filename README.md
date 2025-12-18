@@ -24,7 +24,7 @@ This table provides a high-level overview of each project. Click on the project 
 | -------------------------------------------------------------------- | ------------------------------------------------- | ------------------------ |
 | [**HW1: Bayesian Classifier for Image Segmentation**](#hw1-bayesian-classifier-for-image-segmentation) | Bayesian Decision Theory, DCT Feature Extraction  | **Error Rate: 17.27%** |
 | [**HW2: Gaussian Classifiers for Segmentation**](#hw2-gaussian-classifiers-for-segmentation) | Multivariate Gaussians, MLE, Feature Selection (KL Divergence) | **Error Rate: 7.48%** |
-| [**HW3: Bayesian Parameter Estimation**](#hw3-bayesian-parameter-estimation) | MAP, Bayesian Predictive, Conjugate Priors        | **Error Rate: ~11.80%**|
+| [**HW3: Bayesian Parameter Estimation**](#hw3-bayesian-parameter-estimation) | MAP, Bayesian Predictive, Conjugate Priors        | **Error Rate: ~11.69%** |
 | [**HW4: Mixture Models & EM**](#hw4-mixture-models--em)              | Gaussian Mixture Models, Expectation-Maximization | **Error Rate: ~11.50%** |
 
 -----
@@ -75,31 +75,34 @@ This table provides a high-level overview of each project. Click on the project 
     -   `hw2_solution.py`: Python script for MLE parameter estimation, KL divergence calculation, and image classification. 
     -   `output/`: Directory containing generated plots, including marginal densities and segmentation masks.
     -   `TrainingSamplesDCT_8_new.mat`: Updated training data for Gaussian estimation.
-
 ### HW3: Bayesian Parameter Estimation
 
 -   **Objective:** To explore Bayesian Parameter Estimation by treating the class-conditional mean $\mu$ as a random variable rather than a fixed constant. This project compares the performance of Maximum Likelihood (ML), Maximum A Posteriori (MAP), and Bayesian Predictive estimators across varying dataset sizes ($N$) and prior uncertainties ($\alpha$).
 
 -   **Methodology:**
-    1.  **Model Setup:** Class-conditional densities were modeled as multivariate Gaussians with known covariance but unknown mean.
-    2.  **Prior Distribution:** A Gaussian prior $P(\mu) \sim \mathcal{N}(\mu_0, \Sigma_0)$ was applied to the mean, where $\Sigma_0 = \alpha W$.
+    1.  **Model Setup:** Class-conditional densities were modeled as multivariate Gaussians with known covariance (approximated by the sample covariance of each training subset) but unknown mean.
+    2.  **Prior Distribution:** A Gaussian prior $P(\mu) \sim \mathcal{N}(\mu_0, \Sigma_0)$ was applied to the mean, where $\Sigma_0 = \alpha\,\mathrm{diag}(W_0)$.
     3.  **Estimator Comparison:**
-        * **ML:** Computes parameters solely from training data.
-        * **MAP:** Maximizes the posterior density $P(\mu | \mathcal{D})$.
-        * **Bayesian Predictive:** Integrates out the unknown parameters to compute $P(x | \mathcal{D})$.
-    4.  **Strategies:** Tested two prior strategies: "Informative" (Strategy 1, a good guess close to the true mean) and "Non-Informative" (Strategy 2, a generic guess).
+        * **ML:** Uses the training-set sample mean for each class.
+        * **MAP:** Uses the posterior mean $\mu_n$ as a plug-in estimate.
+        * **Bayesian Predictive:** Uses the predictive covariance $\Sigma + \Sigma_n$ to account for posterior uncertainty in $\mu$.
+    4.  **Decision Rule vs. Evaluation Convention:**
+        * **Class priors in the decision rule:** ML-estimated from the training subset (dataset-dependent).
+        * **Probability of Error (PoE):** Computed on the *cheetah test image* as the **pixel-wise misclassification rate** using the ground-truth mask.
+    5.  **Strategies:** Tested two prior strategies provided by the starter files:
+        * **Strategy 1:** Prior mean closer to the ML means (more informative).
+        * **Strategy 2:** Prior mean farther from the ML means (less informative / poorer prior).
 
 -   **Result:**
-    -   **Small Datasets:** With limited data (Dataset 1), the Bayesian and MAP estimators significantly outperformed ML when the prior was informative (Strategy 1). Conversely, a poor prior (Strategy 2) degraded performance.
-    -   **Data Dominance:** As the dataset size increased (Dataset 4), the likelihood term dominated the prior. All estimators converged to the ML solution regardless of the prior strategy or $\alpha$ value.
-    -   **Visual Analysis:** The plot below demonstrates the "Informative Prior" scenario on a small dataset, where the Bayesian approach (Blue line) achieves a lower probability of error compared to the ML baseline (Green line) at low alpha values.
+    -   **Convergence behavior:** As $\alpha$ becomes large, both MAP and Bayesian Predictive curves converge to the ML baseline (the prior becomes effectively uninformative).
+    -   **Prior sensitivity:** For small $\alpha$, MAP/Predictive performance can improve or degrade relative to ML depending on how well the prior mean aligns with the test-image distribution and the dataset size.
+    -   **Representative curve (Strategy 1, Dataset 1, $d=64$):**
 
-      ![PoE vs Alpha Strategy 1 Dataset 1](hw3/output/PoE_Strategy_1_Dataset_1.png)
+      ![PoE vs Alpha Strategy 1 Dataset 1](hw3/output/PoE_Strategy_1_Dataset_1_d64.png)
 
 -   **File Structure for HW3:**
-    -   `hw3_solution.py`: Script implementing the three estimators and generating PoE curves.
-    -   `hw3.pdf`: Detailed report analyzing the convergence behavior of the estimators.
-    -   `output/`: Contains plots showing Probability of Error vs. Alpha for all strategies and datasets.
+    -   `hw3/hw3_solution.py`: Final implementation that generates the PoE-vs-alpha curves (saved with suffix `_d64.png`).
+    -   `hw3/output/`: Contains plots for both strategies and all datasets:
 
 ### HW4: Mixture Models & EM Algorithm
 
