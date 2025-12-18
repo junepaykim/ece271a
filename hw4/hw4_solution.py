@@ -1,329 +1,365 @@
-﻿import numpy as np
+﻿#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import os
+import argparse
+from dataclasses import dataclass
+from typing import List, Tuple, Optional
+
+import numpy as np
 import scipy.io
-import scipy.stats
 import imageio.v3 as imageio
 import matplotlib.pyplot as plt
-import os
-from scipy.fftpack import dctn
-from tqdm import tqdm
-
-BLOCK_SIZE = 8
-DATA_DIR = 'data/' if os.path.exists('data/') else '.'
-TRAIN_FILE = os.path.join(DATA_DIR, 'TrainingSamplesDCT_8_new.mat')
-IMAGE_FILE = os.path.join(DATA_DIR, 'cheetah.bmp')
-MASK_FILE = os.path.join(DATA_DIR, 'cheetah_mask.bmp')
-ZIGZAG_FILE = os.path.join(DATA_DIR, 'Zig-Zag Pattern.txt')
-OUTPUT_DIR = 'hw4/output/'
-
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+from numpy.lib.stride_tricks import sliding_window_view
+from scipy.fft import dctn
+from scipy.special import logsumexp
 
 
-def load_zigzag_pattern(path):
-    """Loads the Zig-Zag pattern from a text file."""
-    if not os.path.exists(path):
-        return np.array([
-            0, 1, 5, 6, 14, 15, 27, 28,
-            2, 4, 7, 13, 16, 26, 29, 42,
-            3, 8, 12, 17, 25, 30, 41, 43,
-            9, 11, 18, 24, 31, 40, 44, 53,
-            10, 19, 23, 32, 39, 45, 52, 54,
-            20, 22, 33, 38, 46, 51, 55, 60,
-            21, 34, 37, 47, 50, 56, 59, 61,
-            35, 36, 48, 49, 57, 58, 62, 63
-        ])
-    with open(path, 'r') as f:
-        lines = f.readlines()
-    data = []
-    for line in lines:
-        data.extend([int(x) for x in line.split()])
-    return np.argsort(data)
+BLOCK = 8
+TRAIN_MAT = "TrainingSamplesDCT_8_new.mat"
+SUBSETS_MAT = "TrainingSamplesDCT_subsets_8.mat"
+IMG = "cheetah.bmp"
+MASK = "cheetah_mask.bmp"
+ZIGZAG = "Zig-Zag Pattern.txt"
+
+DIMS_DEFAULT = [1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64]
+C_LIST_DEFAULT = [1, 2, 4, 8, 16]
 
 
-def compute_dct_features(img, zigzag_order):
-    """
-    Computes DCT features for an image using an 8x8 sliding window.
-    Returns an (N, 64) array of features and the image dimensions.
-    """
-    img = np.array(img, dtype=float) / 255.0
+@dataclass
+class Paths:
+    train_mat: str
+    subsets_mat: str
+    img: str
+    mask: str
+    zigzag: str
+    out_dir: str
 
+
+def parse_list_int(s: str) -> List[int]:
+    return [int(x.strip()) for x in s.split(",") if x.strip()]
+
+
+def load_training(train_mat: str) -> Tuple[np.ndarray, np.ndarray]:
+    """Load TrainsampleDCT_FG/BG (N,64)."""
+    m = scipy.io.loadmat(train_mat)
+    fg = np.asarray(m["TrainsampleDCT_FG"], dtype=np.float64)
+    bg = np.asarray(m["TrainsampleDCT_BG"], dtype=np.float64)
+    return fg, bg
+
+
+def load_img_mask(img_path: str, mask_path: str) -> Tuple[np.ndarray, np.ndarray]:
+    """Load grayscale image and binary mask."""
+    img = imageio.imread(img_path)
+    msk = imageio.imread(mask_path)
     if img.ndim == 3:
-        img = np.mean(img, axis=2)
+        img = img.mean(axis=2)
+    if msk.ndim == 3:
+        msk = msk.mean(axis=2)
+    img = np.asarray(img, dtype=np.float64)
+    msk = (np.asarray(msk) > 127).astype(np.uint8)
+    return img, msk
 
-    h, w = img.shape
 
-    pad_h = BLOCK_SIZE - 1
-    pad_w = BLOCK_SIZE - 1
-    img_padded = np.pad(img, ((0, pad_h), (0, pad_w)), 'constant', constant_values=0)
+def zigzag_order(zigzag_file: str) -> np.ndarray:
+    """Return 64-length index order list (argsort of rank-matrix)."""
+    toks: List[int] = []
+    with open(zigzag_file, "r") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                toks.extend([int(x) for x in line.split()])
+    ranks = np.array(toks[:64], dtype=int)
+    return np.argsort(ranks).astype(int)
 
-    features = []
 
-    from numpy.lib.stride_tricks import sliding_window_view
-    windows = sliding_window_view(img_padded, (BLOCK_SIZE, BLOCK_SIZE))
+def dct_features_valid(img: np.ndarray, order: np.ndarray, dc_scale: float = 0.5) -> Tuple[np.ndarray, int, int]:
+    """Compute (H-7)*(W-7) DCT features (no padding), zigzag reorder, scale DC."""
+    img01 = img / 255.0
+    win = sliding_window_view(img01, (BLOCK, BLOCK))      # (H-7, W-7, 8, 8)
+    h2, w2 = win.shape[0], win.shape[1]
+    blk = win.reshape(h2 * w2, BLOCK, BLOCK)
+    d = dctn(blk, type=2, norm="ortho", axes=(1, 2)).reshape(h2 * w2, 64)
+    X = d[:, order].astype(np.float64)
+    X[:, 0] *= float(dc_scale)
+    return X, h2, w2
 
-    num_blocks = h * w
-    flat_blocks = windows.reshape(num_blocks, BLOCK_SIZE, BLOCK_SIZE)
 
-    print(f"Computing DCT for {num_blocks} blocks...")
+def mask_valid(mask: np.ndarray, h2: int, w2: int) -> np.ndarray:
+    """Crop mask to valid block top-left positions."""
+    return mask[:h2, :w2].reshape(-1).astype(np.uint8)
 
-    dct_blocks = dctn(flat_blocks, type=2, norm='ortho', axes=(1, 2))
 
-    dct_flat = dct_blocks.reshape(num_blocks, 64)
-    features = dct_flat[:, zigzag_order]
-
-    return features, h, w
+def alpha_ranking_from_subsets(subsets_mat: str) -> np.ndarray:
+    """Compute alpha ranking using D4_FG/D4_BG."""
+    m = scipy.io.loadmat(subsets_mat)
+    fg = np.asarray(m["D4_FG"], dtype=np.float64)
+    bg = np.asarray(m["D4_BG"], dtype=np.float64)
+    mu_fg = fg.mean(axis=0)
+    mu_bg = bg.mean(axis=0)
+    sd_fg = fg.std(axis=0)
+    sd_bg = bg.std(axis=0)
+    alpha = np.abs(mu_fg - mu_bg) / (sd_fg + sd_bg + 1e-12)
+    return np.argsort(-alpha).astype(int)
 
 
 class GMMDiagonal:
-    """
-    Gaussian Mixture Model with Diagonal Covariance matrices trained via EM.
-    """
+    """Diagonal GMM with EM + best-of-n random restarts."""
 
-    def __init__(self, n_components, n_iter=100, tol=1e-4, min_covar=1e-6):
-        self.n_components = n_components
-        self.n_iter = n_iter
-        self.tol = tol
-        self.min_covar = min_covar
-        self.weights = None
-        self.means = None
-        self.covariances = None
-        self.converged_ = False
+    def __init__(self, C: int, n_iter: int, tol: float, reg: float, min_var: float):
+        self.C = int(C)
+        self.n_iter = int(n_iter)
+        self.tol = float(tol)
+        self.reg = float(reg)
+        self.min_var = float(min_var)
+        self.w: Optional[np.ndarray] = None
+        self.m: Optional[np.ndarray] = None
+        self.v: Optional[np.ndarray] = None
 
-    def fit(self, X):
-        """Trains the model using EM."""
-        n_samples, n_features = X.shape
+    @staticmethod
+    def _log_gauss_diag(X: np.ndarray, mean: np.ndarray, var: np.ndarray) -> np.ndarray:
+        var = np.maximum(var, 1e-12)
+        return -0.5 * (np.sum(np.log(2.0 * np.pi * var)) + np.sum((X - mean) ** 2 / var, axis=1))
 
-        indices = np.random.choice(n_samples, self.n_components, replace=False)
-        self.means = X[indices] + np.random.rand(self.n_components, n_features) * 0.01
+    def _e_step(self, X: np.ndarray, w: np.ndarray, m: np.ndarray, v: np.ndarray) -> Tuple[np.ndarray, float]:
+        n = X.shape[0]
+        logp = np.empty((n, self.C), dtype=np.float64)
+        for c in range(self.C):
+            logp[:, c] = np.log(w[c] + 1e-300) + self._log_gauss_diag(X, m[c], v[c])
+        log_norm = logsumexp(logp, axis=1)
+        return logp - log_norm[:, None], float(np.mean(log_norm))
 
-        global_var = np.var(X, axis=0)
-        self.covariances = np.tile(global_var, (self.n_components, 1))
-
-        self.weights = np.ones(self.n_components) / self.n_components
-
-        log_likelihood_old = -np.inf
-
-        for i in range(self.n_iter):
-            log_resp, log_likelihood = self._e_step(X)
-
-            if np.abs(log_likelihood - log_likelihood_old) < self.tol:
-                self.converged_ = True
-                break
-            log_likelihood_old = log_likelihood
-
-            self._m_step(X, log_resp)
-
-    def _e_step(self, X):
-        """Expectation step: calculate log responsibilities."""
-        n_samples, n_features = X.shape
-        weighted_log_prob = np.zeros((n_samples, self.n_components))
-
-        const = -0.5 * n_features * np.log(2 * np.pi)
-
-        for c in range(self.n_components):
-            log_det = np.sum(np.log(self.covariances[c]))
-
-            diff = X - self.means[c]
-            mahalanobis = np.sum((diff ** 2) / self.covariances[c], axis=1)
-
-            log_prob = const - 0.5 * (log_det + mahalanobis)
-            weighted_log_prob[:, c] = np.log(self.weights[c] + 1e-300) + log_prob
-
-        log_prob_norm = scipy.special.logsumexp(weighted_log_prob, axis=1)
-        log_resp = weighted_log_prob - log_prob_norm[:, np.newaxis]
-
-        return log_resp, np.mean(log_prob_norm)
-
-    def _m_step(self, X, log_resp):
-        """Maximization step: update parameters."""
-        n_samples = X.shape[0]
+    def _m_step(self, X: np.ndarray, log_resp: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         resp = np.exp(log_resp)
+        n, d = X.shape
+        Nk = resp.sum(axis=0) + 1e-12
+        w = Nk / n
+        m = (resp.T @ X) / Nk[:, None]
+        v = np.empty((self.C, d), dtype=np.float64)
+        for c in range(self.C):
+            diff = X - m[c]
+            v[c] = (resp[:, c:c+1] * (diff ** 2)).sum(axis=0) / Nk[c]
+            v[c] = np.maximum(v[c] + self.reg, self.min_var)
+        return w, m, v
 
-        Nk = np.sum(resp, axis=0) + 1e-10
+    def _fit_once(self, X: np.ndarray, rng: np.random.Generator) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+        n, d = X.shape
+        idx = rng.choice(n, size=self.C, replace=False)
+        m = X[idx].copy() + rng.normal(scale=1e-3, size=(self.C, d))
+        base_var = np.maximum(np.var(X, axis=0) + self.reg, self.min_var)
+        v = np.tile(base_var[None, :], (self.C, 1))
+        w = np.full((self.C,), 1.0 / self.C, dtype=np.float64)
 
-        self.weights = Nk / n_samples
+        prev = -np.inf
+        best = -np.inf
+        for _ in range(self.n_iter):
+            log_resp, lb = self._e_step(X, w, m, v)
+            if lb > best:
+                best = lb
+            if np.isfinite(prev) and abs(lb - prev) < self.tol:
+                break
+            prev = lb
+            w, m, v = self._m_step(X, log_resp)
+        return w, m, v, best
 
-        self.means = (resp.T @ X) / Nk[:, np.newaxis]
+    def fit_best_of_n(self, X: np.ndarray, n_init: int, seed: int) -> "GMMDiagonal":
+        rngg = np.random.default_rng(seed)
+        best_lb = -np.inf
+        best_params = None
+        for _ in range(max(1, int(n_init))):
+            rng = np.random.default_rng(int(rngg.integers(0, 2**31 - 1)))
+            w, m, v, lb = self._fit_once(X, rng)
+            if lb > best_lb:
+                best_lb = lb
+                best_params = (w, m, v)
+        self.w, self.m, self.v = best_params
+        return self
 
-        for c in range(self.n_components):
-            diff = X - self.means[c]
-            self.covariances[c] = np.sum(resp[:, c:c + 1] * (diff ** 2), axis=0) / Nk[c]
-
-            self.covariances[c] += self.min_covar
-
-    def score_samples(self, X):
-        """Computes weighted log probability P(X|Model) for BDR."""
-        n_samples, n_features = X.shape
-        const = -0.5 * n_features * np.log(2 * np.pi)
-        weighted_log_prob = np.zeros((n_samples, self.n_components))
-
-        for c in range(self.n_components):
-            log_det = np.sum(np.log(self.covariances[c]))
-            diff = X - self.means[c]
-            mahalanobis = np.sum((diff ** 2) / self.covariances[c], axis=1)
-            log_prob = const - 0.5 * (log_det + mahalanobis)
-            weighted_log_prob[:, c] = np.log(self.weights[c] + 1e-300) + log_prob
-
-        return scipy.special.logsumexp(weighted_log_prob, axis=1)
+    def score_samples(self, X: np.ndarray) -> np.ndarray:
+        n = X.shape[0]
+        logp = np.empty((n, self.C), dtype=np.float64)
+        for c in range(self.C):
+            logp[:, c] = np.log(self.w[c] + 1e-300) + self._log_gauss_diag(X, self.m[c], self.v[c])
+        return logsumexp(logp, axis=1)
 
 
-def solve_problem():
-    print("Loading data...")
-    mat_data = scipy.io.loadmat(TRAIN_FILE)
-    train_fg = mat_data['TrainsampleDCT_FG']
-    train_bg = mat_data['TrainsampleDCT_BG']
+def classify(fg: GMMDiagonal, bg: GMMDiagonal, X: np.ndarray, p_fg: float, p_bg: float) -> np.ndarray:
+    ll_fg = fg.score_samples(X) + np.log(p_fg + 1e-300)
+    ll_bg = bg.score_samples(X) + np.log(p_bg + 1e-300)
+    return (ll_fg > ll_bg).astype(np.uint8)
 
-    cheetah_img = imageio.imread(IMAGE_FILE)
-    cheetah_mask = imageio.imread(MASK_FILE)
 
-    cheetah_mask = (cheetah_mask > 127).astype(int)
+def poe(pred: np.ndarray, gt: np.ndarray) -> float:
+    return float(np.mean(pred.astype(np.uint8) != gt.astype(np.uint8)))
 
-    zigzag = load_zigzag_pattern(ZIGZAG_FILE)
 
-    n_fg = train_fg.shape[0]
-    n_bg = train_bg.shape[0]
-    prior_fg = n_fg / (n_fg + n_bg)
-    prior_bg = n_bg / (n_fg + n_bg)
+def solve(
+    p: Paths,
+    dims: List[int],
+    c_list: List[int],
+    n_runs: int,
+    seed: int,
+    max_em_iter: int,
+    tol: float,
+    reg: float,
+    min_var: float,
+    n_init_b: int,
+) -> None:
+    os.makedirs(p.out_dir, exist_ok=True)
 
-    print(f"Priors: FG={prior_fg:.4f}, BG={prior_bg:.4f}")
+    print("[INFO] Loading data...")
+    train_fg, train_bg = load_training(p.train_mat)
+    img, mask = load_img_mask(p.img, p.mask)
 
-    print("Extracting test image features...")
-    test_features, h, w = compute_dct_features(cheetah_img, zigzag)
+    prior_fg = train_fg.shape[0] / (train_fg.shape[0] + train_bg.shape[0])
+    prior_bg = 1.0 - prior_fg
+    print(f"[INFO] Training priors: FG={prior_fg:.6f}, BG={prior_bg:.6f}")
 
-    dim_list = [1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64]
+    order = zigzag_order(p.zigzag)
+    print("[INFO] Extracting test image features...")
+    Xtest, h2, w2 = dct_features_valid(img, order, dc_scale=0.5)
+    ytest = mask_valid(mask, h2, w2)
+    print(f"[INFO] eval size={h2}x{w2} (N={h2*w2})")
 
-    print("\n--- Part A: 5 Mixtures of 8 Components ---")
+    feat_rank = alpha_ranking_from_subsets(p.subsets_mat)
+    print("[INFO] Feature ranking source: computed alpha from subsets D4_FG/D4_BG")
 
-    n_runs = 5
-    n_components = 8
+    def cols_for_d(d: int) -> np.ndarray:
+        return feat_rank[:d]
 
-    fg_models = []
-    bg_models = []
+    rng_global = np.random.default_rng(seed)
 
-    print(f"Training {n_runs} models for FG (C={n_components})...")
-    for i in range(n_runs):
-        gmm = GMMDiagonal(n_components=n_components, n_iter=200)
-        gmm.fit(train_fg)
-        fg_models.append(gmm)
+    print("\n[INFO] --- Part (a): Initialization sensitivity (C=8) ---")
+    C_a = 8
 
-    print(f"Training {n_runs} models for BG (C={n_components})...")
-    for i in range(n_runs):
-        gmm = GMMDiagonal(n_components=n_components, n_iter=200)
-        gmm.fit(train_bg)
-        bg_models.append(gmm)
+    fg_models_by_d: List[List[GMMDiagonal]] = []
+    bg_models_by_d: List[List[GMMDiagonal]] = []
 
-    part_a_errors = []
+    for d in dims:
+        cols = cols_for_d(d)
+        Xfg_d = train_fg[:, cols]
+        Xbg_d = train_bg[:, cols]
 
-    plt.figure(figsize=(12, 8))
+        fg_models = []
+        bg_models = []
 
-    print("Evaluating 25 classifier pairs...")
-    for i in range(n_runs):
+        for _ in range(n_runs):
+            s = int(rng_global.integers(0, 2**31 - 1))
+            fg_models.append(GMMDiagonal(C_a, max_em_iter, tol, reg, min_var).fit_best_of_n(Xfg_d, 1, s))
+
+        for _ in range(n_runs):
+            s = int(rng_global.integers(0, 2**31 - 1))
+            bg_models.append(GMMDiagonal(C_a, max_em_iter, tol, reg, min_var).fit_best_of_n(Xbg_d, 1, s))
+
+        fg_models_by_d.append(fg_models)
+        bg_models_by_d.append(bg_models)
+
+    err_bgfix = [[[0.0 for _ in dims] for _ in range(n_runs)] for _ in range(n_runs)]
+    for k, d in enumerate(dims):
+        cols = cols_for_d(d)
+        Xte_d = Xtest[:, cols]
         for j in range(n_runs):
-            fg_model = fg_models[i]
-            bg_model = bg_models[j]
+            for i in range(n_runs):
+                pred = classify(fg_models_by_d[k][i], bg_models_by_d[k][j], Xte_d, prior_fg, prior_bg)
+                err_bgfix[j][i][k] = poe(pred, ytest)
 
-            errors = []
+    for k, d in enumerate(dims):
+        all_pairs = np.array([err_bgfix[j][i][k] for j in range(n_runs) for i in range(n_runs)], dtype=np.float64)
+        print(f"[INFO] d={d:2d}: mean={all_pairs.mean():.6f} (min={all_pairs.min():.6f}, max={all_pairs.max():.6f})")
 
-            for dim in dim_list:
-                X_test_dim = test_features[:, :dim]
+    fig, axes = plt.subplots(2, 3, figsize=(14, 8), constrained_layout=True)
+    axes = axes.flatten()
+    for j in range(n_runs):
+        ax = axes[j]
+        for i in range(n_runs):
+            ax.plot(dims, err_bgfix[j][i], marker="o", linewidth=1)
+        ax.set_title(f"PE vs d (BG #{j+1} fixed)")
+        ax.set_xlabel("Feature number (d)")
+        ax.set_ylabel("Probability of Error")
+        ax.grid(True)
+    axes[-1].axis("off")
 
-                def get_log_prob(model, X_d, d):
-                    temp_gmm = GMMDiagonal(model.n_components)
-                    temp_gmm.weights = model.weights
-                    temp_gmm.means = model.means[:, :d]
-                    temp_gmm.covariances = model.covariances[:, :d]
-                    return temp_gmm.score_samples(X_d)
+    out_a = os.path.join(p.out_dir, "prob6_a_initialization.png")
+    fig.suptitle("Part (a): Probability of Error vs Feature number (BG fixed; 5 FG curves)", fontsize=14)
+    fig.savefig(out_a, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"[INFO] Saved: {out_a}")
 
-                log_prob_fg = get_log_prob(fg_model, X_test_dim, dim)
-                log_prob_bg = get_log_prob(bg_model, X_test_dim, dim)
-
-                discriminant = (log_prob_fg + np.log(prior_fg)) - (log_prob_bg + np.log(prior_bg))
-                pred_mask = (discriminant > 0).astype(int).reshape(h, w)
-
-                mask_flat = cheetah_mask.flatten()
-                pred_flat = pred_mask.flatten()
-
-                idx_fg = (mask_flat == 1)
-                idx_bg = (mask_flat == 0)
-
-                err_fg = np.sum(pred_flat[idx_fg] == 0) / np.sum(idx_fg)
-                err_bg = np.sum(pred_flat[idx_bg] == 1) / np.sum(idx_bg)
-
-                total_error = err_fg * prior_fg + err_bg * prior_bg
-                errors.append(total_error)
-
-            part_a_errors.append(errors)
-            plt.plot(dim_list, errors, color='blue', alpha=0.3)
-
-    avg_errors = np.mean(part_a_errors, axis=0)
-    plt.plot(dim_list, avg_errors, color='red', linewidth=2, label='Average PoE')
-
-    plt.title('Part A: Probability of Error vs Dimension (25 Initialization Pairs)')
-    plt.xlabel('Dimension')
-    plt.ylabel('Probability of Error')
-    plt.grid(True)
-    plt.legend()
-    plt.savefig(os.path.join(OUTPUT_DIR, 'prob6_a_initialization.png'))
-    plt.close()
-    print(f"Part A Plot saved to {OUTPUT_DIR}")
-
-    # --- Part B: Varying Components ---
-    print("\n--- Part B: Varying Component Counts ---")
-    components_list = [1, 2, 4, 8, 16, 32]
-
+    print("\n[INFO] --- Part (b): Vary number of components C ---")
     plt.figure(figsize=(12, 8))
-    cmap = plt.get_cmap('viridis')
-    colors = [cmap(i) for i in np.linspace(0, 1, len(components_list))]
 
-    for idx, C in enumerate(components_list):
-        print(f"Training mixture with C={C}...")
-
-        gmm_fg = GMMDiagonal(n_components=C, n_iter=200)
-        gmm_fg.fit(train_fg)
-
-        gmm_bg = GMMDiagonal(n_components=C, n_iter=200)
-        gmm_bg.fit(train_bg)
-
+    for C in c_list:
         errors_c = []
+        for d in dims:
+            cols = cols_for_d(d)
+            Xfg_d = train_fg[:, cols]
+            Xbg_d = train_bg[:, cols]
+            Xte_d = Xtest[:, cols]
 
-        for dim in dim_list:
-            X_test_dim = test_features[:, :dim]
+            s_fg = int(rng_global.integers(0, 2**31 - 1))
+            s_bg = int(rng_global.integers(0, 2**31 - 1))
 
-            def get_log_prob_c(model, X_d, d):
-                temp_gmm = GMMDiagonal(model.n_components)
-                temp_gmm.weights = model.weights
-                temp_gmm.means = model.means[:, :d]
-                temp_gmm.covariances = model.covariances[:, :d]
-                return temp_gmm.score_samples(X_d)
+            fg_model = GMMDiagonal(C, max_em_iter, tol, reg, min_var).fit_best_of_n(Xfg_d, n_init_b, s_fg)
+            bg_model = GMMDiagonal(C, max_em_iter, tol, reg, min_var).fit_best_of_n(Xbg_d, n_init_b, s_bg)
 
-            log_prob_fg = get_log_prob_c(gmm_fg, X_test_dim, dim)
-            log_prob_bg = get_log_prob_c(gmm_bg, X_test_dim, dim)
+            pred = classify(fg_model, bg_model, Xte_d, prior_fg, prior_bg)
+            errors_c.append(poe(pred, ytest))
 
-            discriminant = (log_prob_fg + np.log(prior_fg)) - (log_prob_bg + np.log(prior_bg))
-            pred_flat = (discriminant > 0).astype(int)
+        plt.plot(dims, errors_c, marker="o", label=f"C={C}")
+        print(f"[INFO] C={C:2d}: errors = {[f'{e:.4f}' for e in errors_c]}")
 
-            mask_flat = cheetah_mask.flatten()
-            idx_fg = (mask_flat == 1)
-            idx_bg = (mask_flat == 0)
-
-            err_fg = np.sum(pred_flat[idx_fg] == 0) / np.sum(idx_fg)
-            err_bg = np.sum(pred_flat[idx_bg] == 1) / np.sum(idx_bg)
-
-            total_error = err_fg * prior_fg + err_bg * prior_bg
-            errors_c.append(total_error)
-
-        plt.plot(dim_list, errors_c, marker='o', label=f'C={C}', color=colors[idx])
-        print(f"  C={C} Errors: {['{:.4f}'.format(e) for e in errors_c]}")
-
-    plt.title('Part B: Probability of Error vs Dimension (Varying Components)')
-    plt.xlabel('Dimension')
-    plt.ylabel('Probability of Error')
+    plt.title("Part (b): Probability of Error vs Feature number (varying components)")
+    plt.xlabel("Feature number (d)")
+    plt.ylabel("Probability of Error")
     plt.grid(True)
     plt.legend()
-    plt.savefig(os.path.join(OUTPUT_DIR, 'prob6_b_components.png'))
+
+    out_b = os.path.join(p.out_dir, "prob6_b_components.png")
+    plt.savefig(out_b, dpi=150, bbox_inches="tight")
     plt.close()
-    print(f"Part B Plot saved to {OUTPUT_DIR}")
-    print("Done.")
+    print(f"[INFO] Saved: {out_b}")
+
+    print("\n[INFO] Done.")
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--data-dir", default="data")
+    ap.add_argument("--output-dir", default="hw4/output")
+    ap.add_argument("--dims", default=",".join(map(str, DIMS_DEFAULT)))
+    ap.add_argument("--c-list", default=",".join(map(str, C_LIST_DEFAULT)))
+    ap.add_argument("--n-runs", type=int, default=5)
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--max-em-iter", type=int, default=200)
+    ap.add_argument("--tol", type=float, default=1e-4)
+    ap.add_argument("--reg", type=float, default=1e-6)
+    ap.add_argument("--min-var", type=float, default=1e-6)
+    ap.add_argument("--n-init-b", type=int, default=5)
+    args = ap.parse_args()
+
+    p = Paths(
+        train_mat=os.path.join(args.data_dir, TRAIN_MAT),
+        subsets_mat=os.path.join(args.data_dir, SUBSETS_MAT),
+        img=os.path.join(args.data_dir, IMG),
+        mask=os.path.join(args.data_dir, MASK),
+        zigzag=os.path.join(args.data_dir, ZIGZAG),
+        out_dir=args.output_dir,
+    )
+
+    solve(
+        p=p,
+        dims=parse_list_int(args.dims),
+        c_list=parse_list_int(args.c_list),
+        n_runs=args.n_runs,
+        seed=args.seed,
+        max_em_iter=args.max_em_iter,
+        tol=args.tol,
+        reg=args.reg,
+        min_var=args.min_var,
+        n_init_b=args.n_init_b,
+    )
 
 
 if __name__ == "__main__":
-    solve_problem()
+    main()

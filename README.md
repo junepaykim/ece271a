@@ -20,12 +20,12 @@ This repository contains a series of projects completed for UCSD's ECE 271A: Sta
 
 This table provides a high-level overview of each project. Click on the project name to jump to the detailed section.
 
-| Project                                                              | Core Concepts Applied                             | Key Result Metric        |
-| -------------------------------------------------------------------- | ------------------------------------------------- | ------------------------ |
-| [**HW1: Bayesian Classifier for Image Segmentation**](#hw1-bayesian-classifier-for-image-segmentation) | Bayesian Decision Theory, DCT Feature Extraction  | **Error Rate: 17.27%** |
-| [**HW2: Gaussian Classifiers for Segmentation**](#hw2-gaussian-classifiers-for-segmentation) | Multivariate Gaussians, MLE, Feature Selection (KL Divergence) | **Error Rate: 7.48%** |
+| Project                                                              | Core Concepts Applied                             | Key Result Metric       |
+| -------------------------------------------------------------------- | ------------------------------------------------- |-------------------------|
+| [**HW1: Bayesian Classifier for Image Segmentation**](#hw1-bayesian-classifier-for-image-segmentation) | Bayesian Decision Theory, DCT Feature Extraction  | **Error Rate: 17.27%**  |
+| [**HW2: Gaussian Classifiers for Segmentation**](#hw2-gaussian-classifiers-for-segmentation) | Multivariate Gaussians, MLE, Feature Selection (KL Divergence) | **Error Rate: 7.48%**   |
 | [**HW3: Bayesian Parameter Estimation**](#hw3-bayesian-parameter-estimation) | MAP, Bayesian Predictive, Conjugate Priors        | **Error Rate: ~11.69%** |
-| [**HW4: Mixture Models & EM**](#hw4-mixture-models--em)              | Gaussian Mixture Models, Expectation-Maximization | **Error Rate: ~11.50%** |
+| [**HW4: Mixture Models & EM**](#hw4-mixture-models--em)              | Gaussian Mixture Models, Expectation-Maximization | **Error Rate: ~6.50%**  |
 
 -----
 
@@ -106,20 +106,36 @@ This table provides a high-level overview of each project. Click on the project 
 
 ### HW4: Mixture Models & EM Algorithm
 
--   **Objective:** To implement a Gaussian Mixture Model (GMM) classifier using the Expectation-Maximization (EM) algorithm. This project investigates how random initialization affects convergence and how the number of mixture components ($C$) impacts classification error.
+- **Objective:** Implement a Gaussian Mixture Model (GMM) classifier trained with the Expectation–Maximization (EM) algorithm for cheetah (FG) vs grass (BG) segmentation, and study:
+  1) sensitivity to random EM initialization (fixed \(C=8\)), and  
+  2) effect of mixture complexity \(C\) on the probability of error (PoE).
 
--   **Methodology:**
-    1.  **GMM Training (EM):** For both foreground and background classes, densities were modeled as mixtures of multivariate Gaussians with *diagonal* covariance matrices.
-    2.  **Initialization Sensitivity (Part A):** Trained 5 different models per class (random initialization) with $C=8$ components to observe the variance in error rates due to local maxima in the EM likelihood surface.
-    3.  **Model Complexity (Part B):** Trained models with component counts $C \in \{1, 2, 4, 8, 16, 32\}$ to analyze the trade-off between model flexibility and overfitting.
-    4.  **Evaluation:** Probability of Error (PoE) was plotted against the number of feature dimensions (1 to 64).
+- **Methodology:**
+  1. **Model:** Class-conditional densities \(p(\mathbf{x}\mid Y)\) are modeled as GMMs with **diagonal covariance** matrices (one GMM for FG and one for BG).
+  2. **Feature Extraction:** Sliding \(8\times8\) window DCT features (64-D) from `cheetah.bmp` using the provided zig-zag ordering.
+  3. **Feature Ranking (B-order):** Instead of taking the first \(d\) zig-zag coefficients, we **rank features by separability** using \(\alpha\) computed from the provided subset data (from `TrainingSamplesDCT_subsets_8.mat`, using D4_FG/D4_BG), and evaluate using the **top-\(d\)** features by this ranking.
+  4. **Bayes Decision Rule:** Classify using log-likelihood ratio with empirical priors from training counts (FG=250, BG=1053).
+  5. **Experiments:**
+     - **Part (a) Initialization Sensitivity:** Train **5** FG GMMs and **5** BG GMMs with \(C=8\) using different random initializations → **25** FG/BG pairs. For each pair, compute PoE over  
+       \(d \in \{1,2,4,8,16,24,32,40,48,56,64\}\).
+     - **Part (b) Varying Components:** Train one FG/BG pair for each \(C \in \{1,2,4,8,16\}\) and evaluate PoE over the same \(d\) list.
 
--   **Result:**
-    -   **Initialization:** The error rates varied noticeably between different random initializations, confirming that EM is sensitive to starting parameters and can get stuck in local optima.
-    -   **Component Complexity:** Surprisingly, simpler models ($C=1$) performed remarkably well (~11.5% error) on this specific test set. Increasing complexity to $C=32$ did not monotonically decrease error, likely due to the diagonal covariance constraint effectively capturing the data variance without needing many components, or potential overfitting on the 64-dimensional space.
+- **Key Results:**
+  - **Empirical Priors:** FG ≈ **0.1919**, BG ≈ **0.8081**
+  - **Part (a):** Initialization sensitivity is **small** overall. Example at \(d=32\):  
+    mean PoE ≈ **0.0606**, range ≈ **[0.0566, 0.0642]**
+  - **Best dimension region:** PoE typically minimized around **moderate \(d\)** (roughly **24–40**).  
+    In this run, the minimum mean occurs near **\(d=32\)**.
+  - **Part (b):** Mixture complexity matters:  
+    - \(C=1\) degrades at larger \(d\) (PoE grows to ~0.10+)  
+    - **Moderate \(C\)** (often \(C=2\) or \(C=4\)) achieves the **lowest** PoE (mid \(0.05\)–\(0.06\) range)  
+    - Larger \(C\) (8, 16) does **not** consistently improve due to EM local optima / mild overfitting.
 
-      ![PoE vs Dimensions for Varying Components](hw4/output/prob6_b_components.png)
+  ![Part (a): Initialization Sensitivity](hw4/output/prob6_a_initialization.png)
+  ![Part (b): Varying Components](hw4/output/prob6_b_components.png)
 
--   **File Structure for HW4:**
-    -   `hw4_solution.py`: Python script implementing the custom GMM-EM class and performing the experiments.
-    -   `hw4/output/`: Contains the plots for initialization sensitivity and component analysis.
+- **File Structure for HW4:**
+  - `hw4/hw4_solution.py`: Final implementation (GMM-EM training + experiments + plots)
+  - `hw4/output/`:
+    - `prob6_a_initialization.png` (25 init-pairs for \(C=8\))
+    - `prob6_b_components.png` (PoE vs \(d\) for varying \(C\))
